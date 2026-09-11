@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "Food2Go-app",
+    "slug": "Food2Go-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.food2go.app"
+    },
+    "web": {}
+  }
+}
