@@ -12,19 +12,22 @@ import {
 } from "react-native";
 
 import API_BASE from "../constants/api";
+import { useAuth } from "../AuthContext";
 
 /**
  * SetPasswordScreen
  *
- * Shown after a customer successfully verifies their OTP.
- * Calls POST /api/auth/set-password, then logs the user in.
+ * Shown after both customer AND business users successfully verify their OTP.
+ * Calls POST /api/auth/set-password, which now returns a JWT, then
+ * calls login() from AuthContext to persist token and log the user in.
  *
  * Route params:
- *   email    {string}   – verified email address
- *   onLogin  {function} – called with "customer" to complete login
+ *   email  {string} – verified email address
+ *   role   {string} – "customer" | "business"
  */
 export default function SetPasswordScreen({ route }) {
-  const { email, onLogin } = route.params;
+  const { email, role } = route.params;
+  const { login } = useAuth();
 
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -58,24 +61,12 @@ export default function SetPasswordScreen({ route }) {
         return;
       }
 
-      // Password saved — now log the customer in via /login
-      const loginRes = await fetch(`${API_BASE}/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+      // set-password now returns token + role + userId — log in immediately
+      await login({
+        token: data.token,
+        role: data.role,
+        userId: String(data.userId),
       });
-      const loginData = await loginRes.json();
-
-      if (!loginRes.ok) {
-        Alert.alert(
-          "Password Set",
-          "Your password was saved. Please go back and log in.",
-        );
-        return;
-      }
-
-      // Fully logged in
-      onLogin(loginData.role);
     } catch (err) {
       Alert.alert(
         "Connection Error",

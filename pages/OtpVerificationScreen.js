@@ -17,14 +17,15 @@ import API_BASE from "../constants/api";
  * OtpVerificationScreen
  *
  * Route params:
- *   email        {string}   – the email address the OTP was sent to
- *   onLogin      {function} – called with the user's role once fully authenticated
- *   mode         {string}   – "signup" (→ go to SetPassword after verify)
- *                           | "verify_existing" (→ go to SetPassword after verify)
- *                           Both modes redirect to SetPassword; onLogin is called there.
+ *   email   {string} – the email address the OTP was sent to
+ *   role    {string} – "customer" | "business"
+ *   mode    {string} – "signup" | "verify_existing"
+ *
+ * After successful verification the user is sent to SetPassword.
+ * The token / login() call happens there after the password is set.
  */
 export default function OtpVerificationScreen({ route, navigation }) {
-  const { email, onLogin, mode = "signup" } = route.params;
+  const { email, role = "customer", mode = "signup" } = route.params;
 
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
@@ -49,9 +50,8 @@ export default function OtpVerificationScreen({ route, navigation }) {
         return;
       }
 
-      // OTP accepted — navigate to set-password screen so the user can
-      // choose their real password before being logged in.
-      navigation.navigate("SetPassword", { email, onLogin });
+      // Navigate to set-password — both customer and business need this step
+      navigation.navigate("SetPassword", { email, role });
     } catch (err) {
       Alert.alert("Connection Error", "Could not reach the server. Make sure the backend is running and you're on the same Wi-Fi network.");
     } finally {
@@ -76,7 +76,7 @@ export default function OtpVerificationScreen({ route, navigation }) {
       }
 
       Alert.alert("OTP Sent", data.message);
-      setOtp(""); // clear input so the user enters the new code
+      setOtp("");
     } catch (err) {
       Alert.alert("Connection Error", "Could not reach the server. Make sure the backend is running and you're on the same Wi-Fi network.");
     } finally {

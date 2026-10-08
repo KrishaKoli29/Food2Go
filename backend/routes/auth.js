@@ -9,7 +9,7 @@ const sendOtpEmail = require("../utils/sendOtp");
 const router = express.Router();
 
 
-// ─── Helper ─────────────────────────────────────────────────────────────────
+// ─── Helper ──────────────────────────────────────────────────────────────────
 
 /**
  * Generate a plaintext OTP, hash it, compute its expiry timestamp,
@@ -24,16 +24,19 @@ async function makeOtp() {
 }
 
 // ─── POST /api/auth/request-otp ──────────────────────────────────────────────
-// Step 1 of customer sign-up: provide only an email address.
-// Creates (or refreshes) an unverified customer record and sends an OTP.
-// No password is required at this stage.
+// Step 1 of customer OR business sign-up: provide email + role.
+// Creates (or refreshes) an unverified record and sends an OTP.
+// Accepts optional `role` param; defaults to "customer".
 
 router.post("/request-otp", async (req, res) => {
   try {
-    const { email } = req.body;
+    const { email, role = "customer" } = req.body;
 
     if (!email) {
       return res.status(400).json({ message: "email is required." });
+    }
+    if (!["customer", "business"].includes(role)) {
+      return res.status(400).json({ message: "role must be 'customer' or 'business'." });
     }
 
     // Check if a verified account already exists for this email
@@ -54,14 +57,11 @@ router.post("/request-otp", async (req, res) => {
     } else {
       // New user — create a placeholder record (password will be set after OTP)
       // We use a random bcrypt hash as a placeholder so the schema stays valid.
-      const placeholderHash = await bcrypt.hash(
-        Math.random().toString(36),
-        10
-      );
+      const placeholderHash = await bcrypt.hash(Math.random().toString(36), 10);
       await User.create({
         email,
         passwordHash: placeholderHash,
-        role: "customer",
+        role,
         isVerified: false,
         otp: hashedOtp,
         otpExpiresAt,
@@ -84,65 +84,9 @@ router.post("/request-otp", async (req, res) => {
   }
 });
 
-// ─── POST /api/auth/register ─────────────────────────────────────────────────
-// Legacy endpoint — kept for business sign-up (no OTP required).
-
-router.post("/register", async (req, res) => {
-  try {
-    const { email, password, role } = req.body;
-
-    if (!email || !password || !role) {
-      return res.status(400).json({ message: "email, password and role are required." });
-    }
-    if (!["customer", "business"].includes(role)) {
-      return res.status(400).json({ message: "role must be 'customer' or 'business'." });
-    }
-
-    // Check for existing account
-    const existing = await User.findOne({ email });
-    if (existing) {
-      return res.status(409).json({ message: "An account with that email already exists." });
-    }
-
-    const passwordHash = await bcrypt.hash(password, 10);
-
-    // Business — no OTP, mark verified immediately
-    if (role === "business") {
-      await User.create({ email, passwordHash, role, isVerified: true });
-      return res.status(201).json({
-        message: "Business account created. You can now log in.",
-        requiresOtp: false,
-      });
-    }
-
-    // Customer sign-up via legacy path (email+password at once)
-    const { plainOtp, hashedOtp, otpExpiresAt } = await makeOtp();
-    await User.create({
-      email,
-      passwordHash,
-      role,
-      otp: hashedOtp,
-      otpExpiresAt,
-      isVerified: false,
-    });
-
-    try {
-      await sendOtpEmail(email, plainOtp);
-    } catch (mailErr) {
-      console.error("Failed to send OTP email:", mailErr.message);
-    }
-
-    return res.status(201).json({
-      message: "Account created. Check your email for the OTP.",
-      requiresOtp: true,
-    });
-  } catch (err) {
-    console.error("register error:", err);
-    res.status(500).json({ message: "Server error during registration." });
-  }
-});
-
 // ─── POST /api/auth/verify-otp ───────────────────────────────────────────────
+// Verifies OTP for both customer and business sign-up.
+// After verification the user still needs to set their real password via /set-password.
 
 router.post("/verify-otp", async (req, res) => {
   try {
@@ -173,22 +117,14 @@ router.post("/verify-otp", async (req, res) => {
       return res.status(400).json({ message: "Incorrect OTP. Please try again." });
     }
 
-    // Mark verified and clear OTP fields
+    // Mark verified and clear OTP fields — password will be set next
     user.isVerified = true;
     user.otp = null;
     user.otpExpiresAt = null;
     await user.save();
 
-    // Issue JWT so the customer is logged in immediately
-    const token = jwt.sign(
-      { userId: user._id, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
-
     return res.status(200).json({
-      message: "Email verified successfully.",
-      token,
+      message: "Email verified successfully. Please set your password.",
       role: user.role,
     });
   } catch (err) {
@@ -198,8 +134,9 @@ router.post("/verify-otp", async (req, res) => {
 });
 
 // ─── POST /api/auth/set-password ─────────────────────────────────────────────
-// Step 3 of customer sign-up: set the real password after OTP is verified.
+// Step 3 of sign-up (both customer and business): set the real password.
 // The account must already be verified (isVerified = true).
+// Returns a JWT so the client can log the user in immediately.
 
 router.post("/set-password", async (req, res) => {
   try {
@@ -223,7 +160,19 @@ router.post("/set-password", async (req, res) => {
     user.passwordHash = await bcrypt.hash(password, 10);
     await user.save();
 
-    return res.status(200).json({ message: "Password set successfully. You can now log in." });
+    // Issue JWT so the user is logged in immediately after setting password
+    const token = jwt.sign(
+      { userId: user._id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    return res.status(200).json({
+      message: "Password set successfully.",
+      token,
+      role: user.role,
+      userId: user._id,
+    });
   } catch (err) {
     console.error("set-password error:", err);
     res.status(500).json({ message: "Server error while setting password." });
@@ -231,6 +180,7 @@ router.post("/set-password", async (req, res) => {
 });
 
 // ─── POST /api/auth/resend-otp ───────────────────────────────────────────────
+// Works for both customer and business unverified accounts.
 
 router.post("/resend-otp", async (req, res) => {
   try {
@@ -246,9 +196,6 @@ router.post("/resend-otp", async (req, res) => {
     }
     if (user.isVerified) {
       return res.status(400).json({ message: "Email already verified. Please log in." });
-    }
-    if (user.role !== "customer") {
-      return res.status(400).json({ message: "OTP is only required for customer accounts." });
     }
 
     const { plainOtp, hashedOtp, otpExpiresAt } = await makeOtp();
@@ -285,11 +232,12 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ message: "Invalid email or password." });
     }
 
-    // Block unverified customers
-    if (user.role === "customer" && !user.isVerified) {
+    // Block unverified accounts (any role)
+    if (!user.isVerified) {
       return res.status(403).json({
         message: "Please verify your email before logging in.",
         requiresOtp: true,
+        role: user.role,
       });
     }
 
@@ -299,10 +247,33 @@ router.post("/login", async (req, res) => {
       { expiresIn: "7d" }
     );
 
-    return res.status(200).json({ token, role: user.role });
+    return res.status(200).json({
+      token,
+      role: user.role,
+      userId: user._id,
+    });
   } catch (err) {
     console.error("login error:", err);
     res.status(500).json({ message: "Server error during login." });
+  }
+});
+
+// ─── GET /api/auth/me ─────────────────────────────────────────────────────────
+// Validates a stored JWT and returns basic user info.
+// The Expo app uses this on startup to restore session.
+
+const { requireAuth } = require("../middleware/auth");
+
+router.get("/me", requireAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).select("email role isVerified");
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+    res.status(200).json({ userId: user._id, email: user.email, role: user.role });
+  } catch (err) {
+    console.error("me error:", err);
+    res.status(500).json({ message: "Server error." });
   }
 });
 

@@ -1,58 +1,700 @@
-import React from "react";
-import { View, Text, StyleSheet, Button, TextInput } from "react-native";
+import React, { useState, useEffect } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  Button,
+  Alert,
+  ScrollView,
+} from "react-native";
+import { WebView } from "react-native-webview";
+import { API_BUSINESS, API_BAGS } from "../constants/api";
+import { useAuth } from "../AuthContext";
 
-export default function BusinessDashboard({ onLogout }) {
-  return (
-    <View style={styles.container}>
-      <Text style={styles.header}>Update Inventory</Text>
+export default function BusinessDashboard({ navigation }) {
+  const { token, logout } = useAuth();
+  // =========================
+  // STORE INFORMATION
+  // =========================
+  const [storeName, setStoreName] = useState("");
+  const [latitude, setLatitude] = useState(22.5645);
+  const [longitude, setLongitude] = useState(72.9289);
+  const [businessId, setBusinessId] = useState(null);
+  const [businessStatus, setBusinessStatus] = useState(null); // null = not loaded yet
 
-      <View style={styles.card}>
-        <Text style={styles.label}>Bags available today:</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="e.g., 5"
-          keyboardType="numeric"
+  // =========================
+  // SURPLUS FOOD INFORMATION
+  // =========================
+  const [originalPrice, setOriginalPrice] = useState("");
+  const [discountedPrice, setDiscountedPrice] = useState("");
+  const [category, setCategory] = useState("");
+  const [dietType, setDietType] = useState("Veg");
+  const [quantityAvailable, setQuantityAvailable] = useState("");
+  const [pickupStartTime, setPickupStartTime] = useState("");
+  const [pickupEndTime, setPickupEndTime] = useState("");
+
+  // =========================
+  // LOADING STATES
+  // =========================
+  const [savingStore, setSavingStore] = useState(false);
+  const [publishingBag, setPublishingBag] = useState(false);
+
+  // =========================
+  // LOAD EXISTING PROFILE ON MOUNT
+  // =========================
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BUSINESS}/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        if (res.ok && data.business) {
+          setStoreName(data.business.storeName || "");
+          setLatitude(data.business.latitude || 22.5645);
+          setLongitude(data.business.longitude || 72.9289);
+          setBusinessId(data.business._id);
+          setBusinessStatus(data.business.status || "pending");
+        }
+      } catch (_) {
+        // ignore — user will fill in the form
+      }
+    })();
+  }, []);
+
+  // =========================
+  // HANDLE MAP LOCATION
+  // =========================
+  const handleWebMapMessage = (event) => {
+    try {
+      const data = JSON.parse(event.nativeEvent.data);
+
+      if (data.type === "location") {
+        setLatitude(data.latitude);
+        setLongitude(data.longitude);
+      }
+    } catch (error) {
+      console.log("Map message error:", error);
+    }
+  };
+
+  // =========================
+  // SAVE STORE
+  // =========================
+  const saveStore = async () => {
+    if (!storeName.trim()) {
+      Alert.alert("Error", "Please enter your store name.");
+      return;
+    }
+
+    try {
+      setSavingStore(true);
+
+      const res = await fetch(`${API_BUSINESS}/onboard`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          storeName: storeName.trim(),
+          latitude,
+          longitude,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        Alert.alert("Error", data.error || "Failed to save store.");
+        return;
+      }
+
+      setBusinessId(data.business._id);
+      setBusinessStatus(data.business.status || "pending");
+      Alert.alert("Success", "Store profile saved. Awaiting admin approval.");
+    } catch (error) {
+      console.log("Store error:", error.message);
+      Alert.alert(
+        "Connection Error",
+        "Could not reach the server. Make sure the backend is running and you're on the same Wi-Fi network."
+      );
+    } finally {
+      setSavingStore(false);
+    }
+  };
+
+  // =========================
+  // PUBLISH SURPLUS FOOD
+  // =========================
+  const publishBag = async () => {
+    if (!businessId) {
+      Alert.alert(
+        "Save Store First",
+        "Please save your store before publishing food."
+      );
+      return;
+    }
+
+    if (
+      !originalPrice ||
+      !discountedPrice ||
+      !category ||
+      !quantityAvailable ||
+      !pickupStartTime ||
+      !pickupEndTime
+    ) {
+      Alert.alert("Error", "Please fill in all food details.");
+      return;
+    }
+
+    const original = Number(originalPrice);
+    const discounted = Number(discountedPrice);
+    const quantity = Number(quantityAvailable);
+
+    if (
+      Number.isNaN(original) ||
+      Number.isNaN(discounted) ||
+      Number.isNaN(quantity)
+    ) {
+      Alert.alert(
+        "Error",
+        "Please enter valid numbers for prices and quantity."
+      );
+      return;
+    }
+
+    if (original <= 0 || discounted <= 0 || quantity <= 0) {
+      Alert.alert(
+        "Error",
+        "Prices and quantity must be greater than zero."
+      );
+      return;
+    }
+
+    if (discounted >= original) {
+      Alert.alert(
+        "Error",
+        "Discounted price must be lower than original price."
+      );
+      return;
+    }
+
+    // Minimum 30% discount
+    if (discounted > original * 0.7) {
+      Alert.alert(
+        "Discount Too Low",
+        "Food2Go requires at least 30% discount."
+      );
+      return;
+    }
+
+    try {
+      setPublishingBag(true);
+
+      const res = await fetch(`${API_BAGS}/create`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          originalPrice: original,
+          discountedPrice: discounted,
+          category: category.trim(),
+          dietType,
+          quantityAvailable: quantity,
+          pickupStartTime,
+          pickupEndTime,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        Alert.alert("Error", data.error || "Failed to publish surplus food.");
+        return;
+      }
+
+      Alert.alert(
+        "Published!",
+        "Your surplus food is now available to customers."
+      );
+
+      // Clear food fields
+      setOriginalPrice("");
+      setDiscountedPrice("");
+      setCategory("");
+      setQuantityAvailable("");
+      setPickupStartTime("");
+      setPickupEndTime("");
+    } catch (error) {
+      console.log("Bag error:", error.message);
+      Alert.alert(
+        "Connection Error",
+        "Could not reach the server. Make sure the backend is running and you're on the same Wi-Fi network."
+      );
+    } finally {
+      setPublishingBag(false);
+    }
+  };
+
+  // =========================
+  // MAP HTML
+  // =========================
+  const mapHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1.0, maximum-scale=1.0"
         />
 
-        <Text style={styles.label}>Pickup window:</Text>
-        <TextInput style={styles.input} placeholder="e.g., 4:00 PM - 6:00 PM" />
+        <link
+          rel="stylesheet"
+          href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        />
 
-        <View style={styles.publishButton}>
+        <style>
+          html,
+          body,
+          #map {
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+          }
+
+          body {
+            overflow: hidden;
+          }
+        </style>
+      </head>
+
+      <body>
+        <div id="map"></div>
+
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+        <script>
+          const initialLat = ${latitude};
+          const initialLng = ${longitude};
+
+          const map = L.map("map").setView(
+            [initialLat, initialLng],
+            5
+          );
+
+          L.tileLayer(
+            "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+            {
+              attribution: "&copy; OpenStreetMap contributors",
+              maxZoom: 19
+            }
+          ).addTo(map);
+
+          let marker = L.marker([
+            initialLat,
+            initialLng
+          ]).addTo(map);
+
+          marker.bindPopup(
+            "${storeName || "Your Store"}"
+          );
+
+          map.on("click", function(event) {
+            const lat = event.latlng.lat;
+            const lng = event.latlng.lng;
+
+            marker.setLatLng([lat, lng]);
+
+            window.ReactNativeWebView.postMessage(
+              JSON.stringify({
+                type: "location",
+                latitude: lat,
+                longitude: lng
+              })
+            );
+          });
+        </script>
+      </body>
+    </html>
+  `;
+
+  // =========================
+  // STATUS BANNER CONFIG
+  // =========================
+  const statusBanner = {
+    pending: {
+      bg: "#FFF3CD",
+      color: "#856404",
+      icon: "⏳",
+      message: "Your business is pending admin approval. You can save your store details, but cannot publish bags until approved.",
+    },
+    approved: {
+      bg: "#D4EDDA",
+      color: "#155724",
+      icon: "✅",
+      message: "Your business is approved! You can publish Surprise Bags.",
+    },
+    rejected: {
+      bg: "#F8D7DA",
+      color: "#721C24",
+      icon: "❌",
+      message: "Your business registration was rejected. Please contact support.",
+    },
+    suspended: {
+      bg: "#E2E3E5",
+      color: "#383D41",
+      icon: "⏸️",
+      message: "Your business is currently suspended. You cannot publish bags.",
+    },
+  };
+
+  const banner = businessStatus ? statusBanner[businessStatus] : null;
+  const isApproved = businessStatus === "approved";
+
+  // =========================
+  // UI
+  // =========================
+  return (
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+    >
+      <Text style={styles.title}>Business Dashboard</Text>
+
+      <Text style={styles.subtitle}>Manage your store and surplus food</Text>
+
+      {/* ========================= STATUS BANNER ========================= */}
+      {banner && (
+        <View style={[styles.statusBanner, { backgroundColor: banner.bg }]}>
+          <Text style={[styles.statusBannerText, { color: banner.color }]}>
+            {banner.icon} {banner.message}
+          </Text>
+        </View>
+      )}
+      {/* =========================
+          STORE INFORMATION
+      ========================= */}
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>1. Store Information</Text>
+
+        <Text style={styles.label}>Store Name</Text>
+
+        <TextInput
+          style={styles.input}
+          placeholder="e.g. ABC Bakery"
+          value={storeName}
+          onChangeText={setStoreName}
+        />
+
+        <Text style={styles.label}>Select Store Location</Text>
+
+        <Text style={styles.helper}>
+          Tap anywhere on the map to place your store marker.
+        </Text>
+
+        <WebView
+          style={styles.map}
+          originWhitelist={["*"]}
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
+          onMessage={handleWebMapMessage}
+          source={{
+            html: mapHtml,
+          }}
+        />
+
+        <Text style={styles.coordinates}>
+          Latitude: {latitude.toFixed(6)}
+        </Text>
+
+        <Text style={styles.coordinates}>
+          Longitude: {longitude.toFixed(6)}
+        </Text>
+
+        <View style={styles.button}>
           <Button
-            title="Publish Bags"
-            color="green"
-            onPress={() => alert("Bags listed! (Dummy)")}
+            title={
+              savingStore
+                ? "Saving..."
+                : businessId
+                ? "Store Saved ✓"
+                : "Save Store"
+            }
+            onPress={saveStore}
+            disabled={savingStore}
           />
         </View>
       </View>
 
-      <View style={styles.logoutContainer}>
-        <Button title="Log Out" color="red" onPress={onLogout} />
+      {/* =========================
+          SURPLUS FOOD
+      ========================= */}
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>2. Publish Surplus Food</Text>
+
+        {!isApproved ? (
+          <View style={styles.blockedNotice}>
+            <Text style={styles.blockedText}>
+              {businessStatus === "pending" && "⏳ Bag publishing is locked until admin approves your business."}
+              {businessStatus === "rejected" && "❌ Your business was rejected. Bag publishing is not available."}
+              {businessStatus === "suspended" && "⏸️ Your business is suspended. Bag publishing is not available."}
+              {!businessStatus && "💾 Save your store profile first, then wait for admin approval."}
+            </Text>
+          </View>
+        ) : (
+          <>
+            {!businessId && (
+              <Text style={styles.warning}>
+                Save your store first before publishing food.
+              </Text>
+            )}
+
+            <Text style={styles.label}>Food Category</Text>
+
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. Bakery, Meals, Produce"
+              value={category}
+              onChangeText={setCategory}
+            />
+
+            <Text style={styles.label}>Diet Type</Text>
+
+            <View style={styles.dietButtons}>
+              <View style={styles.dietButton}>
+                <Button title="Veg" onPress={() => setDietType("Veg")} />
+              </View>
+
+              <View style={styles.dietButton}>
+                <Button title="Non-Veg" onPress={() => setDietType("Non-Veg")} />
+              </View>
+
+              <View style={styles.dietButton}>
+                <Button title="Mixed" onPress={() => setDietType("Mixed")} />
+              </View>
+            </View>
+
+            <Text style={styles.selectedDiet}>Selected: {dietType}</Text>
+
+            <Text style={styles.label}>Original Price</Text>
+
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. 200"
+              keyboardType="numeric"
+              value={originalPrice}
+              onChangeText={setOriginalPrice}
+            />
+
+            <Text style={styles.label}>Discounted Price</Text>
+
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. 120"
+              keyboardType="numeric"
+              value={discountedPrice}
+              onChangeText={setDiscountedPrice}
+            />
+
+            <Text style={styles.discountInfo}>Minimum discount: 30%</Text>
+
+            <Text style={styles.label}>Quantity Available</Text>
+
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. 5"
+              keyboardType="numeric"
+              value={quantityAvailable}
+              onChangeText={setQuantityAvailable}
+            />
+
+            <Text style={styles.label}>Pickup Start Time</Text>
+
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. 18:00"
+              value={pickupStartTime}
+              onChangeText={setPickupStartTime}
+            />
+
+            <Text style={styles.label}>Pickup End Time</Text>
+
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. 20:00"
+              value={pickupEndTime}
+              onChangeText={setPickupEndTime}
+            />
+
+            <View style={styles.publishButton}>
+              <Button
+                title={publishingBag ? "Publishing..." : "Publish Surplus Food"}
+                onPress={publishBag}
+                disabled={publishingBag || !businessId}
+              />
+            </View>
+          </>
+        )}
       </View>
-    </View>
+
+      {/* =========================
+          FOOTER NAVIGATION
+      ========================= */}
+      <View style={styles.logout}>
+        <Button title="My Bags & Bookings" onPress={() => navigation.navigate("BusinessMyBags")} />
+      </View>
+      <View style={styles.logout}>
+        <Button title="Business Profile" onPress={() => navigation.navigate("BusinessProfile")} />
+      </View>
+      <View style={styles.logout}>
+        <Button title="Log Out" color="red" onPress={logout} />
+      </View>
+    </ScrollView>
   );
 }
 
+// =========================
+// STYLES
+// =========================
+
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, backgroundColor: "#f5f5f5" },
-  header: { fontSize: 22, fontWeight: "bold", marginBottom: 15 },
+  container: {
+    flex: 1,
+    backgroundColor: "#f5f5f5",
+  },
+
+  content: {
+    padding: 20,
+    paddingBottom: 40,
+  },
+
+  title: {
+    fontSize: 26,
+    fontWeight: "bold",
+    marginBottom: 5,
+  },
+
+  subtitle: {
+    color: "#666",
+    marginBottom: 20,
+  },
+
   card: {
     backgroundColor: "#fff",
-    padding: 20,
-    borderRadius: 10,
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 5,
+    padding: 18,
+    borderRadius: 12,
+    marginBottom: 20,
     elevation: 3,
   },
-  label: { fontSize: 16, fontWeight: "bold", marginTop: 10, marginBottom: 5 },
+
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    marginBottom: 15,
+  },
+
+  label: {
+    fontSize: 15,
+    fontWeight: "bold",
+    marginTop: 10,
+    marginBottom: 6,
+  },
+
+  helper: {
+    color: "#666",
+    fontSize: 13,
+    marginBottom: 8,
+  },
+
   input: {
     borderWidth: 1,
     borderColor: "#ccc",
-    padding: 10,
-    borderRadius: 5,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: "#fff",
+  },
+
+  map: {
+    width: "100%",
+    height: 300,
+    borderRadius: 10,
     marginBottom: 10,
   },
-  publishButton: { marginTop: 10 },
-  logoutContainer: { marginTop: 40 },
+
+  coordinates: {
+    color: "#555",
+    fontSize: 13,
+    marginTop: 3,
+  },
+
+  button: {
+    marginTop: 15,
+  },
+
+  dietButtons: {
+    flexDirection: "row",
+    gap: 8,
+  },
+
+  dietButton: {
+    flex: 1,
+  },
+
+  selectedDiet: {
+    marginTop: 8,
+    color: "#555",
+  },
+
+  discountInfo: {
+    color: "#777",
+    fontSize: 13,
+    marginTop: 5,
+  },
+
+  warning: {
+    backgroundColor: "#fff3cd",
+    padding: 10,
+    borderRadius: 8,
+    color: "#856404",
+    marginBottom: 10,
+  },
+
+  publishButton: {
+    marginTop: 20,
+  },
+
+  logout: {
+    marginTop: 5,
+  },
+
+  statusBanner: {
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+  },
+
+  statusBannerText: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+
+  blockedNotice: {
+    backgroundColor: "#F0F2F5",
+    borderRadius: 10,
+    padding: 16,
+    marginVertical: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: "#CCC",
+  },
+
+  blockedText: {
+    color: "#555",
+    fontSize: 14,
+    lineHeight: 20,
+  },
 });

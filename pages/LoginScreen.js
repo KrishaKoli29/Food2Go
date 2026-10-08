@@ -13,8 +13,11 @@ import {
 } from "react-native";
 
 import API_BASE from "../constants/api";
+import { useAuth } from "../AuthContext";
 
-export default function LoginScreen({ navigation, onLogin }) {
+export default function LoginScreen({ navigation }) {
+  const { login } = useAuth();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -31,7 +34,7 @@ export default function LoginScreen({ navigation, onLogin }) {
       const res = await fetch(`${API_BASE}/request-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+        body: JSON.stringify({ email: email.trim().toLowerCase(), role: "customer" }),
       });
       const data = await res.json();
 
@@ -40,11 +43,10 @@ export default function LoginScreen({ navigation, onLogin }) {
         return;
       }
 
-      // Navigate to OTP screen — password will be set AFTER verification
       navigation.navigate("OtpVerification", {
         email: email.trim().toLowerCase(),
-        onLogin,
-        mode: "signup", // tells OTP screen to go to SetPassword next
+        role: "customer",
+        mode: "signup",
       });
     } catch (err) {
       Alert.alert("Connection Error", "Could not reach the server. Make sure the backend is running and you're on the same Wi-Fi network.");
@@ -53,23 +55,20 @@ export default function LoginScreen({ navigation, onLogin }) {
     }
   };
 
-  // ─── BUSINESS SIGN UP: email + password → immediate login ────────────────
+  // ─── BUSINESS SIGN UP: email → OTP → set password ────────────────────────
+  // Now mirrors the customer flow — no direct password entry on this screen.
   const handleBusinessSignUp = async () => {
-    if (!email.trim() || !password) {
-      Alert.alert("Missing Fields", "Please enter both email and password.");
+    if (!email.trim()) {
+      Alert.alert("Missing Email", "Please enter your email address.");
       return;
     }
 
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/register`, {
+      const res = await fetch(`${API_BASE}/request-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: email.trim().toLowerCase(),
-          password,
-          role: "business",
-        }),
+        body: JSON.stringify({ email: email.trim().toLowerCase(), role: "business" }),
       });
       const data = await res.json();
 
@@ -78,9 +77,11 @@ export default function LoginScreen({ navigation, onLogin }) {
         return;
       }
 
-      Alert.alert("Success", data.message, [
-        { text: "Log In Now", onPress: handleLogin },
-      ]);
+      navigation.navigate("OtpVerification", {
+        email: email.trim().toLowerCase(),
+        role: "business",
+        mode: "signup",
+      });
     } catch (err) {
       Alert.alert("Connection Error", "Could not reach the server. Make sure the backend is running and you're on the same Wi-Fi network.");
     } finally {
@@ -109,10 +110,9 @@ export default function LoginScreen({ navigation, onLogin }) {
 
       if (!res.ok) {
         if (data.requiresOtp) {
-          // Account exists but email not yet verified — send them to OTP screen
           navigation.navigate("OtpVerification", {
             email: email.trim().toLowerCase(),
-            onLogin,
+            role: data.role || "customer",
             mode: "verify_existing",
           });
         } else {
@@ -121,7 +121,8 @@ export default function LoginScreen({ navigation, onLogin }) {
         return;
       }
 
-      onLogin(data.role);
+      // Persist token + role + userId in AsyncStorage via context
+      await login({ token: data.token, role: data.role, userId: data.userId });
     } catch (err) {
       Alert.alert("Connection Error", "Could not reach the server. Make sure the backend is running and you're on the same Wi-Fi network.");
     } finally {
@@ -136,6 +137,7 @@ export default function LoginScreen({ navigation, onLogin }) {
     >
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>Food2Go</Text>
+        <Text style={styles.tagline}>Rescue Surplus Food • Gujarat</Text>
 
         <TextInput
           style={styles.input}
@@ -148,7 +150,7 @@ export default function LoginScreen({ navigation, onLogin }) {
         />
         <TextInput
           style={styles.input}
-          placeholder="Password"
+          placeholder="Password (for login)"
           value={password}
           onChangeText={setPassword}
           secureTextEntry
@@ -193,10 +195,17 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   title: {
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: "bold",
-    marginBottom: 28,
+    marginBottom: 4,
     textAlign: "center",
+    color: "#FF6B35",
+  },
+  tagline: {
+    textAlign: "center",
+    color: "#888",
+    fontSize: 13,
+    marginBottom: 32,
   },
   input: {
     borderWidth: 1,

@@ -14,7 +14,7 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ["customer", "business"],
+    enum: ["customer", "business", "admin"],
     required: true,
   },
   // OTP verification — customers only
