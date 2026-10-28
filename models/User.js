@@ -26,6 +26,17 @@ const UserSchema = new mongoose.Schema(
       default: "customer",
     },
 
+    // NGO profile details (only used when role === "ngo")
+    ngoName: {
+      type: String,
+      default: "",
+    },
+
+    ngoContact: {
+      type: String,
+      default: "",
+    },
+
     isEmailVerified: {
       type: Boolean,
       default: false,

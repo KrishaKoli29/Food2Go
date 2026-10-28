@@ -31,7 +31,16 @@ export default function App() {
           </Stack.Screen>
         ) : currentUser.role === "ngo" ? (
           <Stack.Screen name="NGODashboard" options={{ title: "Food2Go NGO" }}>
-            {(props) => <NGODashboardScreen {...props} user={currentUser} onLogout={logout} />}
+            {(props) => (
+              <NGODashboardScreen
+                {...props}
+                user={currentUser}
+                onLogout={logout}
+                onProfileUpdate={(updates) =>
+                  setCurrentUser((prev) => ({ ...prev, ...updates }))
+                }
+              />
+            )}
           </Stack.Screen>
         ) : (
           <Stack.Screen name="BusinessDashboard" options={{ title: "Store Admin" }}>

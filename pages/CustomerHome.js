@@ -15,7 +15,7 @@ import * as Location from "expo-location";
 import { FontAwesome5 } from "@expo/vector-icons";
 import api from "../api";
 
-export default function CustomerHome() {
+export default function CustomerHome({ onLogout }) {
   const [activeTab, setActiveTab] = useState("explore");
   const [location, setLocation] = useState(null);
   const [bags, setBags] = useState([]);
@@ -624,6 +624,20 @@ export default function CustomerHome() {
   // ==========================================
   const cancelCustomerOrder = useCallback(
     (order) => {
+      // Enforce 3-minute cancellation window
+      if (order.createdAt) {
+        const orderTime = new Date(order.createdAt).getTime();
+        const now = Date.now();
+        const minutesElapsed = (now - orderTime) / (1000 * 60);
+        if (minutesElapsed > 3) {
+          Alert.alert(
+            "Cancellation Not Allowed",
+            "Orders can only be cancelled within 3 minutes of being placed. This window has passed."
+          );
+          return;
+        }
+      }
+
       Alert.alert(
         "Cancel Order?",
         "This will cancel your order and restore the food listing. No refund will be issued for an order that has already been paid. Continue?",
@@ -864,6 +878,20 @@ export default function CustomerHome() {
             My Orders
           </Text>
         </TouchableOpacity>
+
+        {onLogout && (
+          <TouchableOpacity
+            style={styles.navTab}
+            onPress={() =>
+              Alert.alert("Logout", "Are you sure you want to log out?", [
+                { text: "Cancel", style: "cancel" },
+                { text: "Logout", style: "destructive", onPress: onLogout },
+              ])
+            }
+          >
+            <Text style={styles.logoutNavText}>Logout</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {activeTab === "explore" ? (
@@ -1125,6 +1153,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#10B981",
     fontWeight: "bold",
+  },
+
+  logoutNavText: {
+    fontSize: 14,
+    color: "#EF4444",
+    fontWeight: "600",
   },
 
   map: {

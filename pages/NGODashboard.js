@@ -1,14 +1,31 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from "react-native";
 import api from "../api";
 
-export default function NGODashboard({ user, onLogout }) {
-  const [ngoName, setNgoName] = useState("");
-  const [ngoContact, setNgoContact] = useState("");
+export default function NGODashboard({ user, onLogout, onProfileUpdate }) {
+  // Pre-fill from the user session (populated at login); server fetch will confirm/update
+  const [ngoName, setNgoName] = useState(user?.ngoName || "");
+  const [ngoContact, setNgoContact] = useState(user?.ngoContact || "");
+  const [profileDirty, setProfileDirty] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
   const [available, setAvailable] = useState([]);
   const [mine, setMine] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
+  const profileLoaded = useRef(false);
+
+  // Load persisted profile from the server on mount (authoritative copy)
+  useEffect(() => {
+    if (!user?.id || profileLoaded.current) return;
+    profileLoaded.current = true;
+    api.get(`/api/auth/ngo/profile?userId=${user.id}`)
+      .then((res) => {
+        setNgoName(res.data.ngoName || "");
+        setNgoContact(res.data.ngoContact || "");
+        setProfileDirty(false);
+      })
+      .catch((err) => console.warn("Could not fetch NGO profile:", err.message));
+  }, [user?.id]);
 
   const refresh = useCallback(async (showError = true) => {
     if (!user?.id) return;
@@ -29,6 +46,33 @@ export default function NGODashboard({ user, onLogout }) {
   }, [user?.id]);
 
   useEffect(() => { refresh(false); }, [refresh]);
+
+  const saveProfile = async () => {
+    if (!ngoName.trim() || !ngoContact.trim()) {
+      Alert.alert("Incomplete details", "Please enter both your NGO name and contact number.");
+      return;
+    }
+    try {
+      setSavingProfile(true);
+      const res = await api.put("/api/auth/ngo/profile", {
+        userId: user.id,
+        ngoName: ngoName.trim(),
+        ngoContact: ngoContact.trim(),
+      });
+      setNgoName(res.data.ngoName);
+      setNgoContact(res.data.ngoContact);
+      setProfileDirty(false);
+      // Notify parent so currentUser stays up-to-date across logout/login
+      if (onProfileUpdate) {
+        onProfileUpdate({ ngoName: res.data.ngoName, ngoContact: res.data.ngoContact });
+      }
+      Alert.alert("Profile saved", "Your organization details have been saved.");
+    } catch (error) {
+      Alert.alert("Could not save profile", error.response?.data?.error || "Please try again.");
+    } finally {
+      setSavingProfile(false);
+    }
+  };
 
   const accept = async (donation) => {
     if (!ngoName.trim() || !ngoContact.trim()) {
@@ -98,9 +142,27 @@ export default function NGODashboard({ user, onLogout }) {
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Organization Details</Text>
         <Text style={styles.detail}>Account: {user?.email || "NGO account"}</Text>
-        <TextInput style={styles.input} placeholder="NGO / charity name" value={ngoName} onChangeText={setNgoName} />
-        <TextInput style={styles.input} placeholder="Contact number" value={ngoContact} onChangeText={setNgoContact} keyboardType="phone-pad" />
+        <TextInput
+          style={styles.input}
+          placeholder="NGO / charity name"
+          value={ngoName}
+          onChangeText={(v) => { setNgoName(v); setProfileDirty(true); }}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Contact number"
+          value={ngoContact}
+          onChangeText={(v) => { setNgoContact(v); setProfileDirty(true); }}
+          keyboardType="phone-pad"
+        />
         <Text style={styles.helper}>These details are shared with the donating business when you accept a donation.</Text>
+        {profileDirty || (!ngoName && !ngoContact) ? (
+          <TouchableOpacity style={styles.saveButton} onPress={saveProfile} disabled={savingProfile}>
+            {savingProfile ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Save Profile</Text>}
+          </TouchableOpacity>
+        ) : (
+          <Text style={styles.savedLabel}>✓ Profile saved</Text>
+        )}
         <TouchableOpacity style={styles.actionButton} onPress={() => refresh()} disabled={loading}>
           {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Refresh Donations</Text>}
         </TouchableOpacity>
@@ -126,6 +188,8 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1, borderColor: "#D6DDD6", borderRadius: 8, padding: 11, marginTop: 10, color: "#222" },
   helper: { color: "#666", fontSize: 12, marginTop: 8, lineHeight: 17 },
   actionButton: { backgroundColor: "#198754", padding: 13, borderRadius: 8, alignItems: "center", justifyContent: "center", marginTop: 12, minHeight: 45 },
+  saveButton: { backgroundColor: "#1565C0", padding: 13, borderRadius: 8, alignItems: "center", justifyContent: "center", marginTop: 12, minHeight: 45 },
+  savedLabel: { color: "#198754", fontWeight: "bold", textAlign: "center", marginTop: 10, fontSize: 13 },
   buttonText: { color: "#fff", fontWeight: "bold", fontSize: 14 },
   empty: { textAlign: "center", color: "#666", marginVertical: 14 },
   logoutButton: { backgroundColor: "#C62828", padding: 14, borderRadius: 8, alignItems: "center", marginTop: 20 },

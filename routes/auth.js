@@ -340,6 +340,9 @@ router.post("/login", async (req, res) => {
         id: user._id,
         email: user.email,
         role: user.role,
+        // Include NGO-specific profile details so the client can restore them
+        ngoName: user.ngoName || "",
+        ngoContact: user.ngoContact || "",
       },
     });
 
@@ -352,6 +355,59 @@ router.post("/login", async (req, res) => {
   }
 });
 
+
+// ==========================
+// NGO PROFILE
+// ==========================
+
+// GET  /api/auth/ngo/profile?userId=<id>
+router.get("/ngo/profile", async (req, res) => {
+  try {
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ error: "userId is required." });
+
+    const user = await User.findById(userId).select("ngoName ngoContact email role");
+    if (!user || user.role !== "ngo") return res.status(404).json({ error: "NGO account not found." });
+
+    return res.json({
+      ngoName: user.ngoName || "",
+      ngoContact: user.ngoContact || "",
+      email: user.email,
+    });
+  } catch (error) {
+    console.error("GET NGO PROFILE ERROR:", error);
+    return res.status(500).json({ error: "Failed to fetch profile." });
+  }
+});
+
+// PUT  /api/auth/ngo/profile
+// Body: { userId, ngoName, ngoContact }
+router.put("/ngo/profile", async (req, res) => {
+  try {
+    const { userId, ngoName, ngoContact } = req.body;
+    if (!userId) return res.status(400).json({ error: "userId is required." });
+    if (!String(ngoName || "").trim() || !String(ngoContact || "").trim()) {
+      return res.status(400).json({ error: "NGO name and contact number are required." });
+    }
+
+    const user = await User.findById(userId);
+    if (!user || user.role !== "ngo") return res.status(404).json({ error: "NGO account not found." });
+
+    user.ngoName = String(ngoName).trim();
+    user.ngoContact = String(ngoContact).trim();
+    await user.save();
+
+    return res.json({
+      success: true,
+      message: "Profile saved.",
+      ngoName: user.ngoName,
+      ngoContact: user.ngoContact,
+    });
+  } catch (error) {
+    console.error("PUT NGO PROFILE ERROR:", error);
+    return res.status(500).json({ error: "Failed to save profile." });
+  }
+});
 
 // ==========================
 // CUSTOMER OTP

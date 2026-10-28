@@ -65,4 +65,48 @@ router.get("/active", async (req, res) => {
   }
 });
 
+// Get a single business by ID (used to restore saved coordinates on login)
+router.get("/:id", async (req, res) => {
+  try {
+    const business = await Business.findById(req.params.id);
+
+    if (!business) {
+      return res.status(404).json({ error: "Business not found." });
+    }
+
+    res.status(200).json({ business });
+  } catch (error) {
+    console.log("Error fetching business:", error.message);
+    res.status(500).json({ error: "Failed to fetch business." });
+  }
+});
+
+// Update store location coordinates
+router.patch("/:id/location", async (req, res) => {
+  try {
+    const { latitude, longitude } = req.body;
+
+    if (latitude === undefined || longitude === undefined) {
+      return res.status(400).json({ error: "latitude and longitude are required." });
+    }
+
+    const business = await Business.findByIdAndUpdate(
+      req.params.id,
+      { latitude: Number(latitude), longitude: Number(longitude) },
+      { new: true }
+    );
+
+    if (!business) {
+      return res.status(404).json({ error: "Business not found." });
+    }
+
+    console.log(`Location updated for business ${req.params.id}: (${latitude}, ${longitude})`);
+
+    res.status(200).json({ message: "Location updated successfully.", business });
+  } catch (error) {
+    console.log("Error updating location:", error.message);
+    res.status(500).json({ error: "Failed to update location." });
+  }
+});
+
 module.exports = router;
