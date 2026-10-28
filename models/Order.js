@@ -36,17 +36,16 @@ const OrderSchema = new mongoose.Schema({
       "reserved",
       "completed",
       "failed",
+      "cancelled",
     ],
     default: "pending",
   },
 
-  // True while this order holds one unit of stock.
   stockReserved: {
     type: Boolean,
     default: true,
   },
 
-  // Prevents stock from being restored more than once.
   stockReleased: {
     type: Boolean,
     default: false,

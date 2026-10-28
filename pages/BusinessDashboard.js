@@ -40,6 +40,16 @@ export default function BusinessDashboard({ onLogout }) {
 
   const [orders, setOrders] = useState([]);
   const [businessBags, setBusinessBags] = useState([]);
+  const [donations, setDonations] = useState([]);
+  const [donationCategory, setDonationCategory] = useState("");
+  const [donationDietType, setDonationDietType] = useState("Veg");
+  const [donationQuantity, setDonationQuantity] = useState("");
+  const [donationStartTime, setDonationStartTime] = useState("18:00");
+  const [donationEndTime, setDonationEndTime] = useState("21:00");
+  const [donationNotes, setDonationNotes] = useState("");
+  const [publishingDonation, setPublishingDonation] = useState(false);
+  const [loadingDonations, setLoadingDonations] = useState(false);
+  const [cancellingDonationId, setCancellingDonationId] = useState(null);
   const [otpInputs, setOtpInputs] = useState({});
   const [verifyingOrderId, setVerifyingOrderId] = useState(null);
 
@@ -267,6 +277,89 @@ export default function BusinessDashboard({ onLogout }) {
     },
     [businessId]
   );
+
+  // FETCH BUSINESS DONATION HISTORY
+  const fetchDonations = useCallback(async (showError = true) => {
+    if (!businessId) {
+      setDonations([]);
+      return;
+    }
+    try {
+      setLoadingDonations(true);
+      const response = await api.get(`/api/donations/business/${encodeURIComponent(businessId)}`);
+      setDonations(Array.isArray(response.data.donations) ? response.data.donations : []);
+    } catch (error) {
+      console.error("FETCH DONATIONS ERROR:", error.response?.data || error.message);
+      if (showError) Alert.alert("Unable to load donations", error.response?.data?.message || "Please try again.");
+    } finally {
+      setLoadingDonations(false);
+    }
+  }, [businessId]);
+
+  // PUBLISH A FREE FOOD DONATION
+  const publishDonation = async () => {
+    if (!businessId) {
+      Alert.alert("Register your store", "Register your store before donating food.");
+      return;
+    }
+    if (!donationCategory.trim() || !donationQuantity.trim()) {
+      Alert.alert("Missing details", "Enter the food category and quantity.");
+      return;
+    }
+    const quantity = Number(donationQuantity);
+    const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      Alert.alert("Invalid quantity", "Enter a whole number greater than zero.");
+      return;
+    }
+    if (!timePattern.test(donationStartTime) || !timePattern.test(donationEndTime)) {
+      Alert.alert("Invalid pickup time", "Use 24-hour format, for example 18:00.");
+      return;
+    }
+    try {
+      setPublishingDonation(true);
+      await api.post("/api/donations/create", {
+        businessId,
+        category: donationCategory.trim(),
+        dietType: donationDietType,
+        quantity,
+        pickupStartTime: donationStartTime,
+        pickupEndTime: donationEndTime,
+        notes: donationNotes.trim(),
+      });
+      setDonationCategory("");
+      setDonationDietType("Veg");
+      setDonationQuantity("");
+      setDonationStartTime("18:00");
+      setDonationEndTime("21:00");
+      setDonationNotes("");
+      await fetchDonations(false);
+      Alert.alert("Donation published", "NGOs can now view and accept your free food donation.");
+    } catch (error) {
+      console.error("PUBLISH DONATION ERROR:", error.response?.data || error.message);
+      Alert.alert("Donation failed", error.response?.data?.message || "Unable to publish donation.");
+    } finally {
+      setPublishingDonation(false);
+    }
+  };
+
+  const cancelDonation = (donation) => {
+    Alert.alert("Cancel donation", "Cancel this donation? It can only be cancelled before an NGO accepts it.", [
+      { text: "Keep it", style: "cancel" },
+      { text: "Cancel donation", style: "destructive", onPress: async () => {
+        try {
+          setCancellingDonationId(donation._id);
+          await api.patch(`/api/donations/${donation._id}/cancel`, { businessId });
+          await fetchDonations(false);
+          Alert.alert("Cancelled", "Your donation has been cancelled.");
+        } catch (error) {
+          Alert.alert("Unable to cancel", error.response?.data?.message || "Only available donations can be cancelled.");
+        } finally {
+          setCancellingDonationId(null);
+        }
+      } },
+    ]);
+  };
 
   // START EDITING LISTING
   const startEditingListing = (bag) => {
@@ -547,12 +640,14 @@ export default function BusinessDashboard({ onLogout }) {
     if (!initializing && businessId) {
       fetchBusinessBags(false);
       fetchBusinessOrders();
+      fetchDonations(false);
     }
   }, [
     initializing,
     businessId,
     fetchBusinessBags,
     fetchBusinessOrders,
+    fetchDonations,
   ]);
 
   // HANDLE MAP LOCATION
@@ -969,6 +1064,57 @@ export default function BusinessDashboard({ onLogout }) {
             Register your store before publishing food.
           </Text>
         )}
+      </View>
+
+      {/* DONATE FOOD TO NGOs */}
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Donate Food to Charity 💚</Text>
+        <Text style={styles.description}>Offer surplus food for free to registered NGOs and charitable organizations. No payment is collected for donations.</Text>
+        <Text style={styles.label}>Food Category</Text>
+        <TextInput style={styles.input} placeholder="e.g. Fresh meals, bakery, fruits" placeholderTextColor="#777" value={donationCategory} onChangeText={setDonationCategory} />
+        <Text style={styles.label}>Diet Type</Text>
+        <View style={styles.dietRow}>
+          {["Veg", "Non-Veg", "Mixed"].map((type) => (
+            <TouchableOpacity key={type} style={[styles.dietButton, donationDietType === type && styles.selectedDietButton]} onPress={() => setDonationDietType(type)}>
+              <Text style={[styles.dietText, donationDietType === type && styles.selectedDietText]}>{type}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <Text style={styles.label}>Quantity (meals / packs)</Text>
+        <TextInput style={styles.input} placeholder="Enter quantity" placeholderTextColor="#777" keyboardType="number-pad" value={donationQuantity} onChangeText={setDonationQuantity} />
+        <Text style={styles.label}>Pickup Start Time (24-hour format)</Text>
+        <TextInput style={styles.input} placeholder="18:00" placeholderTextColor="#777" value={donationStartTime} onChangeText={setDonationStartTime} maxLength={5} />
+        <Text style={styles.label}>Pickup End Time (24-hour format)</Text>
+        <TextInput style={styles.input} placeholder="21:00" placeholderTextColor="#777" value={donationEndTime} onChangeText={setDonationEndTime} maxLength={5} />
+        <Text style={styles.label}>Additional Notes (optional)</Text>
+        <TextInput style={[styles.input, { minHeight: 72, textAlignVertical: "top" }]} placeholder="Allergens, packing details, storage instructions..." placeholderTextColor="#777" value={donationNotes} onChangeText={setDonationNotes} multiline />
+        <TouchableOpacity style={[styles.primaryButton, (!businessId || publishingDonation) && styles.disabledButton]} onPress={publishDonation} disabled={!businessId || publishingDonation}>
+          {publishingDonation ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Publish Free Donation</Text>}
+        </TouchableOpacity>
+        {!businessId && <Text style={styles.warningText}>Register your store before publishing a donation.</Text>}
+      </View>
+
+      {/* DONATION HISTORY */}
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Donation History</Text>
+        <TouchableOpacity style={styles.primaryButton} onPress={() => fetchDonations()} disabled={loadingDonations}>
+          {loadingDonations ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Refresh Donations</Text>}
+        </TouchableOpacity>
+        {loadingDonations && donations.length === 0 ? <ActivityIndicator style={styles.loader} color="#198754" /> : donations.length === 0 ? (
+          <Text style={styles.emptyText}>You have not published any donations yet.</Text>
+        ) : donations.map((donation) => (
+          <View key={donation._id} style={styles.listingCard}>
+            <Text style={styles.orderTitle}>{donation.category}</Text>
+            <Text style={styles.orderText}>Quantity: {donation.quantity}</Text>
+            <Text style={styles.orderText}>Diet: {donation.dietType}</Text>
+            <Text style={styles.orderText}>Pickup: {donation.pickupStartTime} - {donation.pickupEndTime}</Text>
+            <Text style={styles.orderText}>Recipient: {donation.ngoName || "Waiting for an NGO"}</Text>
+            {donation.ngoContact ? <Text style={styles.orderText}>NGO Contact: {donation.ngoContact}</Text> : null}
+            {donation.notes ? <Text style={styles.orderText}>Notes: {donation.notes}</Text> : null}
+            <Text style={[styles.listingStatus, ["Cancelled", "Completed"].includes(donation.status) && styles.inactiveListingStatus]}>Status: {donation.status}</Text>
+            {donation.status === "Available" && <TouchableOpacity style={styles.deleteButton} disabled={cancellingDonationId === donation._id} onPress={() => cancelDonation(donation)}>{cancellingDonationId === donation._id ? <ActivityIndicator color="#fff" /> : <Text style={styles.deleteButtonText}>Cancel Donation</Text>}</TouchableOpacity>}
+          </View>
+        ))}
       </View>
 
       {/* MY FOOD LISTINGS */}

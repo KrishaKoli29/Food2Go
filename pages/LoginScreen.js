@@ -35,14 +35,14 @@ export default function LoginScreen({ navigation, onLogin }) {
 
       console.log("Login response:", response.data);
 
-      const role = response.data.user.role;
+      const user = response.data.user;
 
       Alert.alert(
         "Success",
         "Login successful!"
       );
 
-      onLogin(role);
+      onLogin(user);
 
     } catch (error) {
       console.log(

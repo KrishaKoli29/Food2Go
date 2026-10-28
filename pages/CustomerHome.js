@@ -620,6 +620,58 @@ export default function CustomerHome() {
   };
 
   // ==========================================
+  // CANCEL CUSTOMER ORDER (NO REFUND)
+  // ==========================================
+  const cancelCustomerOrder = useCallback(
+    (order) => {
+      Alert.alert(
+        "Cancel Order?",
+        "This will cancel your order and restore the food listing. No refund will be issued for an order that has already been paid. Continue?",
+        [
+          { text: "Keep Order", style: "cancel" },
+          {
+            text: "Cancel Order",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                const response = await api.post(
+                  "/api/orders/cancel-customer-order",
+                  {
+                    orderId: order._id,
+                    customerPhone,
+                  }
+                );
+
+                if (!response.data?.success) {
+                  throw new Error(
+                    response.data?.message || "Unable to cancel order."
+                  );
+                }
+
+                await Promise.all([fetchOrders(true), fetchBags()]);
+
+                Alert.alert(
+                  "Order Cancelled",
+                  response.data.message ||
+                    "Your order was cancelled and the food listing was restored."
+                );
+              } catch (error) {
+                Alert.alert(
+                  "Cancellation Failed",
+                  error.response?.data?.message ||
+                    error.message ||
+                    "Please try again."
+                );
+              }
+            },
+          },
+        ]
+      );
+    },
+    [customerPhone, fetchOrders, fetchBags]
+  );
+
+  // ==========================================
   // RENDER FOOD LISTING
   // ==========================================
   const renderBag = ({ item }) => (
@@ -692,6 +744,8 @@ export default function CustomerHome() {
         ? "#2563EB"
         : status === "failed"
         ? "#DC2626"
+        : status === "cancelled"
+        ? "#6B7280"
         : "#D97706";
 
     return (
@@ -753,6 +807,17 @@ export default function CustomerHome() {
               ? new Date(item.createdAt).toLocaleString()
               : ""}
           </Text>
+
+          {["pending", "paid", "reserved"].includes(status) && (
+            <TouchableOpacity
+              style={styles.cancelOrderButton}
+              onPress={() => cancelCustomerOrder(item)}
+            >
+              <Text style={styles.cancelOrderButtonText}>
+                Cancel Order
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     );
@@ -1269,6 +1334,23 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#9CA3AF",
     marginTop: 8,
+  },
+
+  cancelOrderButton: {
+    alignSelf: "flex-start",
+    backgroundColor: "#FEE2E2",
+    borderWidth: 1,
+    borderColor: "#FCA5A5",
+    borderRadius: 8,
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    marginTop: 12,
+  },
+
+  cancelOrderButtonText: {
+    color: "#B91C1C",
+    fontSize: 13,
+    fontWeight: "700",
   },
 
   checkoutContainer: {

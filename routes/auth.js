@@ -57,7 +57,7 @@ router.post("/send-signup-otp", async (req, res) => {
       });
     }
 
-    if (!["customer", "business"].includes(role)) {
+    if (!["customer", "business", "ngo"].includes(role)) {
       return res.status(400).json({
         error: "Invalid role.",
       });
@@ -234,7 +234,7 @@ router.post("/signup", async (req, res) => {
       });
     }
 
-    if (!["customer", "business"].includes(role)) {
+    if (!["customer", "business", "ngo"].includes(role)) {
       return res.status(400).json({
         error: "Invalid role.",
       });
