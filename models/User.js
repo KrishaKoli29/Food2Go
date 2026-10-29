@@ -22,8 +22,19 @@ const UserSchema = new mongoose.Schema(
 
     role: {
       type: String,
-      enum: ["customer", "business"],
+      enum: ["customer", "business", "ngo"],
       default: "customer",
+    },
+
+    // NGO profile details (only used when role === "ngo")
+    ngoName: {
+      type: String,
+      default: "",
+    },
+
+    ngoContact: {
+      type: String,
+      default: "",
     },
 
     isEmailVerified: {

@@ -4,7 +4,7 @@ const bcrypt = require("bcryptjs");
 const nodemailer = require("nodemailer");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
-
+const Business = require("../models/Business");
 const router = express.Router();
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -30,18 +30,13 @@ const transporter = nodemailer.createTransport({
 // Temporary signup data + OTP
 const signupOtpStore = {};
 
-
 // ==========================
 // HASH PASSWORD
 // ==========================
 
 function hashPassword(password) {
-  return crypto
-    .createHash("sha256")
-    .update(password)
-    .digest("hex");
+  return crypto.createHash("sha256").update(password).digest("hex");
 }
-
 
 // ==========================
 // SEND SIGNUP EMAIL OTP
@@ -57,7 +52,7 @@ router.post("/send-signup-otp", async (req, res) => {
       });
     }
 
-    if (!["customer", "business"].includes(role)) {
+    if (!["customer", "business", "ngo"].includes(role)) {
       return res.status(400).json({
         error: "Invalid role.",
       });
@@ -78,9 +73,7 @@ router.post("/send-signup-otp", async (req, res) => {
     }
 
     // Generate 6 digit OTP
-    const otp = crypto
-      .randomInt(100000, 999999)
-      .toString();
+    const otp = crypto.randomInt(100000, 999999).toString();
 
     // OTP expires in 5 minutes
     const expiresAt = Date.now() + 5 * 60 * 1000;
@@ -110,7 +103,6 @@ If you did not request this OTP, please ignore this email.`,
     res.status(200).json({
       message: "OTP sent successfully.",
     });
-
   } catch (error) {
     console.log("Send signup OTP error:", error);
 
@@ -119,7 +111,6 @@ If you did not request this OTP, please ignore this email.`,
     });
   }
 });
-
 
 // ==========================
 // VERIFY SIGNUP EMAIL OTP
@@ -194,7 +185,7 @@ router.post("/verify-signup-otp", async (req, res) => {
       JWT_SECRET,
       {
         expiresIn: "7d",
-      }
+      },
     );
 
     res.status(201).json({
@@ -206,7 +197,6 @@ router.post("/verify-signup-otp", async (req, res) => {
         role: user.role,
       },
     });
-
   } catch (error) {
     console.log("Verify signup OTP error:", error);
 
@@ -215,7 +205,6 @@ router.post("/verify-signup-otp", async (req, res) => {
     });
   }
 });
-
 
 // ==========================
 // NORMAL SIGNUP
@@ -234,7 +223,7 @@ router.post("/signup", async (req, res) => {
       });
     }
 
-    if (!["customer", "business"].includes(role)) {
+    if (!["customer", "business", "ngo"].includes(role)) {
       return res.status(400).json({
         error: "Invalid role.",
       });
@@ -267,7 +256,7 @@ router.post("/signup", async (req, res) => {
       JWT_SECRET,
       {
         expiresIn: "7d",
-      }
+      },
     );
 
     res.status(201).json({
@@ -279,7 +268,6 @@ router.post("/signup", async (req, res) => {
         role: user.role,
       },
     });
-
   } catch (error) {
     console.log("Signup error:", error);
 
@@ -288,7 +276,6 @@ router.post("/signup", async (req, res) => {
     });
   }
 });
-
 
 // ==========================
 // LOGIN
@@ -330,19 +317,40 @@ router.post("/login", async (req, res) => {
       JWT_SECRET,
       {
         expiresIn: "7d",
-      }
+      },
     );
+
+    // --- NEW LOGIC: Check if this user already has a store ---
+    let businessId = null;
+    let storeName = null;
+
+    // Checking both uppercase and lowercase just to be safe
+    if (user.role === "Business" || user.role === "business") {
+      // Look for a store in MongoDB that belongs to this specific user's ID
+      const existingStore = await Business.findOne({ userId: user._id });
+
+      if (existingStore) {
+        businessId = existingStore._id;
+        storeName = existingStore.storeName;
+      }
+    }
+    // -----------------------------------------------------------
 
     res.status(200).json({
       message: "Login successful.",
       token,
+      role: user.role, // Placed here so your frontend LoginScreen can read it easily
+      businessId, // Sends the ID if they have a store, or null if they don't
+      storeName, // Sends the store name if they have one
       user: {
         id: user._id,
         email: user.email,
         role: user.role,
+        // Include NGO-specific profile details so the client can restore them
+        ngoName: user.ngoName || "",
+        ngoContact: user.ngoContact || "",
       },
     });
-
   } catch (error) {
     console.log("Login error:", error);
 
@@ -352,6 +360,64 @@ router.post("/login", async (req, res) => {
   }
 });
 
+// ==========================
+// NGO PROFILE
+// ==========================
+
+// GET  /api/auth/ngo/profile?userId=<id>
+router.get("/ngo/profile", async (req, res) => {
+  try {
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ error: "userId is required." });
+
+    const user = await User.findById(userId).select(
+      "ngoName ngoContact email role",
+    );
+    if (!user || user.role !== "ngo")
+      return res.status(404).json({ error: "NGO account not found." });
+
+    return res.json({
+      ngoName: user.ngoName || "",
+      ngoContact: user.ngoContact || "",
+      email: user.email,
+    });
+  } catch (error) {
+    console.error("GET NGO PROFILE ERROR:", error);
+    return res.status(500).json({ error: "Failed to fetch profile." });
+  }
+});
+
+// PUT  /api/auth/ngo/profile
+// Body: { userId, ngoName, ngoContact }
+router.put("/ngo/profile", async (req, res) => {
+  try {
+    const { userId, ngoName, ngoContact } = req.body;
+    if (!userId) return res.status(400).json({ error: "userId is required." });
+    if (!String(ngoName || "").trim() || !String(ngoContact || "").trim()) {
+      return res
+        .status(400)
+        .json({ error: "NGO name and contact number are required." });
+    }
+
+    const user = await User.findById(userId);
+    if (!user || user.role !== "ngo")
+      return res.status(404).json({ error: "NGO account not found." });
+
+    user.ngoName = String(ngoName).trim();
+    user.ngoContact = String(ngoContact).trim();
+    await user.save();
+
+    return res.json({
+      success: true,
+      message: "Profile saved.",
+      ngoName: user.ngoName,
+      ngoContact: user.ngoContact,
+    });
+  } catch (error) {
+    console.error("PUT NGO PROFILE ERROR:", error);
+    return res.status(500).json({ error: "Failed to save profile." });
+  }
+});
 
 // ==========================
 // CUSTOMER OTP
@@ -368,9 +434,7 @@ router.post("/customer/send-otp", (req, res) => {
     });
   }
 
-  const otp = crypto
-    .randomInt(100000, 999999)
-    .toString();
+  const otp = crypto.randomInt(100000, 999999).toString();
 
   otpStore[phone] = otp;
 
@@ -381,7 +445,6 @@ router.post("/customer/send-otp", (req, res) => {
   });
 });
 
-
 // ==========================
 // ADMIN LOGIN
 // ==========================
@@ -389,10 +452,7 @@ router.post("/customer/send-otp", (req, res) => {
 router.post("/admin/login", (req, res) => {
   const { email, password } = req.body;
 
-  if (
-    email === "admin@food2go.com" &&
-    password === "secureAdmin123"
-  ) {
+  if (email === "admin@food2go.com" && password === "secureAdmin123") {
     return res.status(200).json({
       message: "Admin authenticated",
       role: "admin",
@@ -403,6 +463,5 @@ router.post("/admin/login", (req, res) => {
     error: "Invalid admin credentials",
   });
 });
-
 
 module.exports = router;

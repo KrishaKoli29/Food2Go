@@ -26,6 +26,7 @@ app.use("/api/auth", require("./routes/auth"));
 app.use("/api/business", require("./routes/business"));
 app.use("/api/bags", bagsRouter);
 app.use("/api/orders", require("./routes/orders"));
+app.use("/api/donations", require("./routes/donations"));
 
 // Temporary diagnostic endpoint
 app.get("/debug", (req, res) => {
@@ -54,7 +55,7 @@ mongoose
   .then(() => console.log("MongoDB Connected"))
   .catch((err) => console.log("MongoDB Error:", err.message));
 
-// Start Server
+// Start Server 
 app.listen(5000, () => {
   console.log("Server running on port 5000");
 });

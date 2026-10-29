@@ -15,7 +15,7 @@ import * as Location from "expo-location";
 import { FontAwesome5 } from "@expo/vector-icons";
 import api from "../api";
 
-export default function CustomerHome() {
+export default function CustomerHome({ onLogout }) {
   const [activeTab, setActiveTab] = useState("explore");
   const [location, setLocation] = useState(null);
   const [bags, setBags] = useState([]);
@@ -620,6 +620,72 @@ export default function CustomerHome() {
   };
 
   // ==========================================
+  // CANCEL CUSTOMER ORDER (NO REFUND)
+  // ==========================================
+  const cancelCustomerOrder = useCallback(
+    (order) => {
+      // Enforce 3-minute cancellation window
+      if (order.createdAt) {
+        const orderTime = new Date(order.createdAt).getTime();
+        const now = Date.now();
+        const minutesElapsed = (now - orderTime) / (1000 * 60);
+        if (minutesElapsed > 3) {
+          Alert.alert(
+            "Cancellation Not Allowed",
+            "Orders can only be cancelled within 3 minutes of being placed. This window has passed."
+          );
+          return;
+        }
+      }
+
+      Alert.alert(
+        "Cancel Order?",
+        "This will cancel your order and restore the food listing. No refund will be issued for an order that has already been paid. Continue?",
+        [
+          { text: "Keep Order", style: "cancel" },
+          {
+            text: "Cancel Order",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                const response = await api.post(
+                  "/api/orders/cancel-customer-order",
+                  {
+                    orderId: order._id,
+                    customerPhone,
+                  }
+                );
+
+                if (!response.data?.success) {
+                  throw new Error(
+                    response.data?.message || "Unable to cancel order."
+                  );
+                }
+
+                await Promise.all([fetchOrders(true), fetchBags()]);
+
+                Alert.alert(
+                  "Order Cancelled",
+                  response.data.message ||
+                    "Your order was cancelled and the food listing was restored."
+                );
+              } catch (error) {
+                Alert.alert(
+                  "Cancellation Failed",
+                  error.response?.data?.message ||
+                    error.message ||
+                    "Please try again."
+                );
+              }
+            },
+          },
+        ]
+      );
+    },
+    [customerPhone, fetchOrders, fetchBags]
+  );
+
+  // ==========================================
   // RENDER FOOD LISTING
   // ==========================================
   const renderBag = ({ item }) => (
@@ -692,6 +758,8 @@ export default function CustomerHome() {
         ? "#2563EB"
         : status === "failed"
         ? "#DC2626"
+        : status === "cancelled"
+        ? "#6B7280"
         : "#D97706";
 
     return (
@@ -753,6 +821,17 @@ export default function CustomerHome() {
               ? new Date(item.createdAt).toLocaleString()
               : ""}
           </Text>
+
+          {["pending", "paid", "reserved"].includes(status) && (
+            <TouchableOpacity
+              style={styles.cancelOrderButton}
+              onPress={() => cancelCustomerOrder(item)}
+            >
+              <Text style={styles.cancelOrderButtonText}>
+                Cancel Order
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     );
@@ -799,6 +878,20 @@ export default function CustomerHome() {
             My Orders
           </Text>
         </TouchableOpacity>
+
+        {onLogout && (
+          <TouchableOpacity
+            style={styles.navTab}
+            onPress={() =>
+              Alert.alert("Logout", "Are you sure you want to log out?", [
+                { text: "Cancel", style: "cancel" },
+                { text: "Logout", style: "destructive", onPress: onLogout },
+              ])
+            }
+          >
+            <Text style={styles.logoutNavText}>Logout</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {activeTab === "explore" ? (
@@ -1062,6 +1155,12 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
 
+  logoutNavText: {
+    fontSize: 14,
+    color: "#EF4444",
+    fontWeight: "600",
+  },
+
   map: {
     height: "35%",
     width: "100%",
@@ -1269,6 +1368,23 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#9CA3AF",
     marginTop: 8,
+  },
+
+  cancelOrderButton: {
+    alignSelf: "flex-start",
+    backgroundColor: "#FEE2E2",
+    borderWidth: 1,
+    borderColor: "#FCA5A5",
+    borderRadius: 8,
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    marginTop: 12,
+  },
+
+  cancelOrderButtonText: {
+    color: "#B91C1C",
+    fontSize: 13,
+    fontWeight: "700",
   },
 
   checkoutContainer: {

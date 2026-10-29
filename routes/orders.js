@@ -444,7 +444,122 @@ router.post("/verify-payment", async (req, res) => {
   }
 });
 
-// 4. CANCEL ORDER AND RELEASE RESERVED STOCK
+// 4. CUSTOMER CANCELS AN EXISTING ORDER (NO REFUND)
+// This endpoint is separate from /cancel-order, which is used by Razorpay
+// checkout to release stock when checkout is dismissed before payment.
+router.post("/cancel-customer-order", async (req, res) => {
+  try {
+    const { orderId, customerPhone } = req.body;
+
+    if (!orderId || !customerPhone) {
+      return res.status(400).json({
+        success: false,
+        message: "Order ID and customer phone are required.",
+      });
+    }
+
+    if (!/^[0-9a-fA-F]{24}$/.test(String(orderId))) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order ID.",
+      });
+    }
+
+    // Only cancel an order belonging to this customer and only once.
+    const order = await Order.findOneAndUpdate(
+      {
+        _id: orderId,
+        customerPhone: String(customerPhone),
+        status: { $in: ["pending", "paid", "reserved"] },
+        stockReserved: true,
+        stockReleased: false,
+      },
+      {
+        $set: {
+          status: "cancelled",
+          stockReserved: false,
+          stockReleased: true,
+          pickupOTP: null,
+        },
+      },
+      { new: true }
+    );
+
+    if (!order) {
+      const existingOrder = await Order.findOne({
+        _id: orderId,
+        customerPhone: String(customerPhone),
+      });
+
+      if (!existingOrder) {
+        return res.status(404).json({
+          success: false,
+          message: "Order not found for this customer.",
+        });
+      }
+
+      if (existingOrder.status === "completed") {
+        return res.status(409).json({
+          success: false,
+          message: "Completed orders cannot be cancelled.",
+        });
+      }
+
+      if (existingOrder.status === "cancelled" || existingOrder.stockReleased) {
+        return res.status(200).json({
+          success: true,
+          message: "This order is already cancelled.",
+          order: existingOrder,
+        });
+      }
+
+      return res.status(409).json({
+        success: false,
+        message: "This order cannot be cancelled in its current status.",
+      });
+    }
+
+    // Restore exactly one unit of stock. The atomic order update above prevents
+    // repeated cancellation requests from restoring stock more than once.
+    const bag = await SurpriseBag.findByIdAndUpdate(
+      order.bagId,
+      {
+        $inc: { quantityAvailable: 1 },
+        $set: { status: "Active" },
+      },
+      { new: true }
+    );
+
+    if (!bag) {
+      console.error(
+        `Order ${order._id} was cancelled but listing ${order.bagId} was not found; stock needs reconciliation.`
+      );
+
+      return res.status(500).json({
+        success: false,
+        cancelled: true,
+        message:
+          "Order was cancelled, but the food listing could not be restored. Please contact support.",
+        order,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Order cancelled and food listing restored.",
+      order,
+      bag,
+    });
+  } catch (error) {
+    console.error("Customer order cancellation error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Unable to cancel this order. Please try again.",
+    });
+  }
+});
+
+// 5. CANCEL CHECKOUT AND RELEASE RESERVED STOCK (UNPAID CHECKOUT ONLY)
 router.post("/cancel-order", async (req, res) => {
   try {
     const { razorpayOrderId } = req.body;
@@ -504,7 +619,7 @@ router.post("/cancel-order", async (req, res) => {
   }
 });
 
-// 5. MARK PAYMENT AS FAILED
+// 6. MARK PAYMENT AS FAILED
 router.post("/payment-failed", async (req, res) => {
   try {
     const { razorpayOrderId } = req.body;
@@ -563,7 +678,7 @@ router.post("/payment-failed", async (req, res) => {
   }
 });
 
-// 6. GET CUSTOMER ORDERS
+// 7. GET CUSTOMER ORDERS
 router.get("/my-orders", async (req, res) => {
   try {
     const { customerPhone } = req.query;
@@ -600,7 +715,7 @@ router.get("/my-orders", async (req, res) => {
   }
 });
 
-// 7. GET ALL ORDERS FOR A BUSINESS
+// 8. GET ALL ORDERS FOR A BUSINESS
 router.get("/business-orders", async (req, res) => {
   try {
     const { businessId } = req.query;

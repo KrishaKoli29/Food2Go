@@ -126,7 +126,7 @@ export default function SignupScreen({ onLogin }) {
       );
 
       // Login immediately
-      onLogin(selectedRole);
+      onLogin(response.data.user);
 
     } catch (error) {
       console.log(
@@ -261,6 +261,15 @@ export default function SignupScreen({ onLogin }) {
           onPress={() =>
             handleSignUp("business")
           }
+          disabled={loading}
+        />
+      </View>
+
+      <View style={styles.buttonSpacing}>
+        <Button
+          title={loading ? "Sending OTP..." : "NGO / Charity (Receive Donations)"}
+          color="#8B5CF6"
+          onPress={() => handleSignUp("ngo")}
           disabled={loading}
         />
       </View>
